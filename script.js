@@ -139,7 +139,8 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {Promise<object[]>} A list of players in the activity.
      */
     const getPostGameCarnageReport = async (accessToken, activityId) => {
-        const pgcrUrl = `${BUNGIE_API_BASE}/Destiny2/Stats/PostGameCarnageReport/${activityId}/`;
+        // This endpoint specifically needs to use stats.bungie.net over HTTPS to avoid mixed content errors.
+        const pgcrUrl = `https://stats.bungie.net/Platform/Destiny2/Stats/PostGameCarnageReport/${activityId}/`;
         const pgcrResponse = await bungieApiRequest(pgcrUrl, accessToken);
         return pgcrResponse.entries || [];
     };
