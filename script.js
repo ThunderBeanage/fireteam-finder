@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const loadMoreButton = document.getElementById('load-more-button');
     const loadingMoreSpinner = document.getElementById('loading-more');
     const searchBar = document.getElementById('search-bar');
+    const searchButton = document.getElementById('search-button');
 
     // --- HELPER FUNCTIONS ---
     /**
@@ -109,6 +110,8 @@ document.addEventListener('DOMContentLoaded', () => {
             showSection(activityHistoryContainer);
             paginationContainer.classList.remove('hidden');
             loadMoreButton.disabled = false;
+            // After rendering, apply the current search filter
+            applySearchFilter();
 
         } catch (error) {
             console.error("An error occurred while fetching activities:", error);
@@ -229,6 +232,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
+     * Filters the visible activity cards based on the search bar's value.
+     */
+    const applySearchFilter = () => {
+        const searchTerm = searchBar.value.toLowerCase();
+        const activityCards = document.querySelectorAll('.activity-card');
+        activityCards.forEach(card => {
+            const activityName = card.getAttribute('data-activity-name');
+            if (activityName.includes(searchTerm)) {
+                card.style.display = 'block';
+            } else {
+                card.style.display = 'none';
+            }
+        });
+    };
+
+    /**
      * Main function to orchestrate the initial data fetch.
      * @param {string} token The OAuth access token.
      */
@@ -260,17 +279,12 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchAndRenderActivities(currentPage);
     });
     
-    searchBar.addEventListener('input', (e) => {
-        const searchTerm = e.target.value.toLowerCase();
-        const activityCards = document.querySelectorAll('.activity-card');
-        activityCards.forEach(card => {
-            const activityName = card.getAttribute('data-activity-name');
-            if (activityName.includes(searchTerm)) {
-                card.style.display = 'block';
-            } else {
-                card.style.display = 'none';
-            }
-        });
+    searchButton.addEventListener('click', applySearchFilter);
+
+    searchBar.addEventListener('keyup', (e) => {
+        if (e.key === 'Enter') {
+            applySearchFilter();
+        }
     });
 
     const urlParams = new URLSearchParams(window.location.search);
