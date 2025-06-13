@@ -88,6 +88,16 @@ header p {
     margin-bottom: 20px;
 }
 
+.spinner-small {
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border-left-color: var(--accent-color);
+    animation: spin 1s ease infinite;
+}
+
+
 @keyframes spin {
     0% {
         transform: rotate(0deg);
@@ -184,4 +194,33 @@ header p {
     margin: 0;
     font-size: 0.9em;
     color: var(--secondary-text-color);
+}
+
+#pagination-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-top: 30px;
+    gap: 20px;
+}
+
+#load-more-button {
+    background-color: var(--accent-color);
+    color: var(--primary-text-color);
+    border: none;
+    padding: 12px 25px;
+    font-size: 1em;
+    font-weight: 700;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+#load-more-button:hover {
+    background-color: #357abd;
+}
+
+#load-more-button:disabled {
+    background-color: var(--border-color);
+    cursor: not-allowed;
 }

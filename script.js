@@ -8,6 +8,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const BUNGIE_AUTH_URL = `https://www.bungie.net/en/OAuth/Authorize?client_id=${OAUTH_CLIENT_ID}&response_type=code`;
     const BUNGIE_API_BASE = "https://www.bungie.net/Platform";
 
+    // --- STATE ---
+    let currentPage = 0;
+    let membershipInfo = null;
+    let characterId = null;
+    let accessToken = null;
+    const activityDefinitionCache = new Map();
+
     // --- DOM ELEMENTS ---
     const loginButton = document.getElementById('login-button');
     const loginContainer = document.getElementById('login-container');
@@ -15,6 +22,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const errorMessage = document.getElementById('error-message');
     const activityHistoryContainer = document.getElementById('activity-history');
     const activitiesContainer = document.getElementById('activities-container');
+    const paginationContainer = document.getElementById('pagination-container');
+    const loadMoreButton = document.getElementById('load-more-button');
+    const loadingMoreSpinner = document.getElementById('loading-more');
 
     // --- HELPER FUNCTIONS ---
     /**
@@ -34,36 +44,75 @@ document.addEventListener('DOMContentLoaded', () => {
     /**
      * Makes a request to the Bungie API.
      * @param {string} url The URL to fetch.
-     * @param {string} accessToken The OAuth access token.
+     * @param {string} token The OAuth access token (optional for public endpoints).
      * @returns {Promise<any>} The JSON response from the API.
      */
-    const bungieApiRequest = async (url, accessToken) => {
-        const headers = {
-            "X-API-Key": API_KEY
-        };
-        if (accessToken) {
-            headers["Authorization"] = `Bearer ${accessToken}`;
+    const bungieApiRequest = async (url, token = null) => {
+        const headers = { "X-API-Key": API_KEY };
+        if (token) {
+            headers["Authorization"] = `Bearer ${token}`;
         }
-
         const response = await fetch(url, { headers });
-
-        if (!response.ok) {
-            throw new Error(`Bungie API request failed: ${response.statusText}`);
-        }
+        if (!response.ok) throw new Error(`Bungie API request failed: ${response.statusText}`);
         const data = await response.json();
-        if (data.ErrorCode !== 1) {
-             throw new Error(`Bungie API Error: ${data.Message}`);
-        }
+        if (data.ErrorCode !== 1) throw new Error(`Bungie API Error: ${data.Message}`);
         return data.Response;
+    };
+
+    /**
+     * Fetches the definition for a specific activity from the manifest.
+     * @param {string} activityHash The hash of the activity.
+     * @returns {Promise<object>} The activity definition.
+     */
+    const getActivityDefinition = async (activityHash) => {
+        if (activityDefinitionCache.has(activityHash)) {
+            return activityDefinitionCache.get(activityHash);
+        }
+        const url = `${BUNGIE_API_BASE}/Destiny2/Manifest/DestinyActivityDefinition/${activityHash}/`;
+        const definition = await bungieApiRequest(url);
+        activityDefinitionCache.set(activityHash, definition);
+        return definition;
     };
 
     // --- CORE LOGIC ---
     /**
-     * Handles the login button click by redirecting to Bungie for authentication.
+     * Fetches a page of activities and renders them.
+     * @param {number} page The page number to fetch.
      */
-    loginButton.addEventListener('click', () => {
-        window.location.href = BUNGIE_AUTH_URL;
-    });
+    const fetchAndRenderActivities = async (page) => {
+        try {
+            loadMoreButton.disabled = true;
+            loadingMoreSpinner.classList.remove('hidden');
+
+            const recentActivities = await getActivityHistory(accessToken, membershipInfo.membershipType, membershipInfo.membershipId, characterId, page);
+
+            if (recentActivities.length === 0) {
+                loadMoreButton.textContent = "No More Activities";
+                paginationContainer.classList.remove('hidden');
+                loadingMoreSpinner.classList.add('hidden');
+                return; // Stop here if no more activities
+            }
+            
+            const activitiesWithDetails = await Promise.all(recentActivities.map(async (activity) => {
+                const fireteam = await getPostGameCarnageReport(accessToken, activity.activityDetails.instanceId);
+                const definition = await getActivityDefinition(activity.activityDetails.directorActivityHash);
+                return { ...activity, fireteam, definition };
+            }));
+
+            renderActivities(activitiesWithDetails);
+            
+            showSection(activityHistoryContainer);
+            paginationContainer.classList.remove('hidden');
+            loadMoreButton.disabled = false;
+
+        } catch (error) {
+            console.error("An error occurred while fetching activities:", error);
+            errorMessage.querySelector('p').textContent = `An error occurred: ${error.message}`;
+            showSection(errorMessage);
+        } finally {
+            loadingMoreSpinner.classList.add('hidden');
+        }
+    };
     
     /**
      * Exchanges the authorization code for an access token.
@@ -73,96 +122,76 @@ document.addEventListener('DOMContentLoaded', () => {
     const getAccessToken = async (authCode) => {
         const response = await fetch(`${BUNGIE_API_BASE}/app/oauth/token/`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                "X-API-Key": API_KEY
-            },
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', "X-API-Key": API_KEY },
             body: `grant_type=authorization_code&code=${authCode}&client_id=${OAUTH_CLIENT_ID}`
         });
-
-        if (!response.ok) {
-            throw new Error('Failed to fetch access token');
-        }
-
+        if (!response.ok) throw new Error('Failed to fetch access token');
         const data = await response.json();
         return data.access_token;
     };
     
     /**
      * Fetches the user's primary Destiny membership information.
-     * @param {string} accessToken The OAuth access token.
+     * @param {string} token The OAuth access token.
      * @returns {Promise<object>} An object containing membershipType and membershipId.
      */
-    const getMembershipInfo = async (accessToken) => {
-        const userResponse = await bungieApiRequest(`${BUNGIE_API_BASE}/User/GetMembershipsForCurrentUser/`, accessToken);
+    const getMembershipInfo = async (token) => {
+        const userResponse = await bungieApiRequest(`${BUNGIE_API_BASE}/User/GetMembershipsForCurrentUser/`, token);
         const destinyMembership = userResponse.destinyMemberships[0];
-        if (!destinyMembership) {
-            throw new Error("No Destiny 2 account found for this Bungie user.");
-        }
-        return {
-            membershipType: destinyMembership.membershipType,
-            membershipId: destinyMembership.membershipId
-        };
+        if (!destinyMembership) throw new Error("No Destiny 2 account found for this Bungie user.");
+        return { membershipType: destinyMembership.membershipType, membershipId: destinyMembership.membershipId };
     };
 
     /**
      * Fetches the character IDs for a given user.
-     * @param {string} accessToken The OAuth access token.
+     * @param {string} token The OAuth access token.
      * @param {number} membershipType The user's membership type.
      * @param {string} membershipId The user's membership ID.
      * @returns {Promise<string[]>} A list of character IDs.
      */
-     const getCharacterIds = async (accessToken, membershipType, membershipId) => {
+     const getCharacterIds = async (token, membershipType, membershipId) => {
         const profileUrl = `${BUNGIE_API_BASE}/Destiny2/${membershipType}/Profile/${membershipId}/?components=Characters`;
-        const profileResponse = await bungieApiRequest(profileUrl, accessToken);
+        const profileResponse = await bungieApiRequest(profileUrl, token);
         return Object.keys(profileResponse.characters.data);
      };
 
     /**
      * Fetches the recent activity history for a character.
-     * @param {string} accessToken The OAuth access token.
+     * @param {string} token The OAuth access token.
      * @param {number} membershipType The user's membership type.
      * @param {string} membershipId The user's membership ID.
-     * @param {string} characterId The character's ID.
+     * @param {string} charId The character's ID.
+     * @param {number} page The page number to fetch.
      * @returns {Promise<object[]>} A list of activity data.
      */
-    const getActivityHistory = async (accessToken, membershipType, membershipId, characterId) => {
-        const activityUrl = `${BUNGIE_API_BASE}/Destiny2/${membershipType}/Account/${membershipId}/Character/${characterId}/Stats/Activities/?count=10`;
-        const activityResponse = await bungieApiRequest(activityUrl, accessToken);
+    const getActivityHistory = async (token, membershipType, membershipId, charId, page) => {
+        const activityUrl = `${BUNGIE_API_BASE}/Destiny2/${membershipType}/Account/${membershipId}/Character/${charId}/Stats/Activities/?count=10&page=${page}`;
+        const activityResponse = await bungieApiRequest(activityUrl, token);
         return activityResponse.activities || [];
     };
 
     /**
      * Fetches the Post Game Carnage Report (PGCR) for a specific activity.
-     * @param {string} accessToken The OAuth access token.
+     * @param {string} token The OAuth access token.
      * @param {string} activityId The ID of the activity instance.
      * @returns {Promise<object[]>} A list of players in the activity.
      */
-    const getPostGameCarnageReport = async (accessToken, activityId) => {
-        // This endpoint specifically needs to use stats.bungie.net over HTTPS to avoid mixed content errors.
+    const getPostGameCarnageReport = async (token, activityId) => {
         const pgcrUrl = `https://stats.bungie.net/Platform/Destiny2/Stats/PostGameCarnageReport/${activityId}/`;
-        const pgcrResponse = await bungieApiRequest(pgcrUrl, accessToken);
+        const pgcrResponse = await bungieApiRequest(pgcrUrl, token);
         return pgcrResponse.entries || [];
     };
 
     /**
      * Renders the fetched activities and their fireteams onto the page.
-     * @param {Array} activitiesWithFireteams - An array of activity objects, each with a 'fireteam' property.
+     * @param {Array} activitiesWithDetails - An array of activity objects, each with 'fireteam' and 'definition' properties.
      */
-    const renderActivities = (activitiesWithFireteams) => {
-        activitiesContainer.innerHTML = ''; // Clear previous results
-
-        if (activitiesWithFireteams.length === 0) {
-            activitiesContainer.innerHTML = '<p>No recent activities found.</p>';
-            return;
-        }
-
-        activitiesWithFireteams.forEach(activity => {
+    const renderActivities = (activitiesWithDetails) => {
+        activitiesWithDetails.forEach(activity => {
             const card = document.createElement('div');
             card.className = 'activity-card';
-
             const activityDate = new Date(activity.period).toLocaleString();
-            const activityName = activity.activityDetails.directorActivityHash; // Note: This is a hash. A manifest lookup would be needed for the real name.
+            const activityName = activity.definition.displayProperties.name || 'Classified Activity';
 
             let playersHtml = '<ul class="player-list">';
             activity.fireteam.forEach(player => {
@@ -170,7 +199,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const displayNameCode = player.player.destinyUserInfo.bungieGlobalDisplayNameCode;
                 const fullBungieId = `${displayName}#${displayNameCode}`;
                 const playerIcon = player.player.destinyUserInfo.iconPath ? `https://www.bungie.net${player.player.destinyUserInfo.iconPath}` : '';
-
                 playersHtml += `
                     <li class="player-item">
                         <img src="${playerIcon}" class="player-icon" onerror="this.style.display='none'">
@@ -178,50 +206,35 @@ document.addEventListener('DOMContentLoaded', () => {
                             <h4>${fullBungieId}</h4>
                             <p>Character ID: ${player.characterId}</p>
                         </div>
-                    </li>
-                `;
+                    </li>`;
             });
             playersHtml += '</ul>';
 
             card.innerHTML = `
                 <div class="activity-header">
-                    <h3>Activity ID: ${activityName}</h3>
+                    <h3>${activityName}</h3>
                     <p>Completed: ${activityDate}</p>
                 </div>
-                ${playersHtml}
-            `;
+                ${playersHtml}`;
 
             activitiesContainer.appendChild(card);
         });
     }
 
     /**
-     * Main function to orchestrate the fetching and displaying of data.
-     * @param {string} accessToken The OAuth access token.
+     * Main function to orchestrate the initial data fetch.
+     * @param {string} token The OAuth access token.
      */
-    const main = async (accessToken) => {
+    const main = async (token) => {
         try {
             showSection(loadingIndicator);
-
-            const { membershipType, membershipId } = await getMembershipInfo(accessToken);
-            const characterIds = await getCharacterIds(accessToken, membershipType, membershipId);
-
-            if (!characterIds.length) {
-                throw new Error("No characters found on this account.");
-            }
-
-            // Using the first character for simplicity
-            const primaryCharacterId = characterIds[0]; 
-            const recentActivities = await getActivityHistory(accessToken, membershipType, membershipId, primaryCharacterId);
-
-            const activitiesWithFireteams = [];
-            for (const activity of recentActivities) {
-                const fireteam = await getPostGameCarnageReport(accessToken, activity.activityDetails.instanceId);
-                activitiesWithFireteams.push({ ...activity, fireteam });
-            }
+            accessToken = token;
+            membershipInfo = await getMembershipInfo(accessToken);
+            const characterIds = await getCharacterIds(accessToken, membershipInfo.membershipType, membershipInfo.membershipId);
+            if (!characterIds.length) throw new Error("No characters found on this account.");
+            characterId = characterIds[0]; // Using the first character for simplicity
             
-            renderActivities(activitiesWithFireteams);
-            showSection(activityHistoryContainer);
+            await fetchAndRenderActivities(currentPage);
 
         } catch (error) {
             console.error("An error occurred:", error);
@@ -230,26 +243,27 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // --- INITIALIZATION ---
-    /**
-     * On page load, check for an OAuth code in the URL.
-     */
+    // --- EVENT LISTENERS & INITIALIZATION ---
+    loginButton.addEventListener('click', () => {
+        window.location.href = BUNGIE_AUTH_URL;
+    });
+
+    loadMoreButton.addEventListener('click', () => {
+        currentPage++;
+        fetchAndRenderActivities(currentPage);
+    });
+    
     const urlParams = new URLSearchParams(window.location.search);
     const authCode = urlParams.get('code');
 
     if (authCode) {
-        // We have a code, let's get the token and run the app
-        // Clear the code from the URL for a cleaner look
         history.replaceState(null, '', REDIRECT_URI);
-        getAccessToken(authCode).then(accessToken => {
-            main(accessToken);
-        }).catch(error => {
+        getAccessToken(authCode).then(main).catch(error => {
             console.error("Failed to get access token:", error);
             errorMessage.querySelector('p').textContent = `Failed to authenticate with Bungie. Please try logging in again.`;
             showSection(errorMessage);
         });
     } else {
-        // No code, show the login button
         showSection(loginContainer);
     }
 });
