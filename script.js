@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const paginationContainer = document.getElementById('pagination-container');
     const loadMoreButton = document.getElementById('load-more-button');
     const loadingMoreSpinner = document.getElementById('loading-more');
+    const searchBar = document.getElementById('search-bar');
 
     // --- HELPER FUNCTIONS ---
     /**
@@ -86,11 +87,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const recentActivities = await getActivityHistory(accessToken, membershipInfo.membershipType, membershipInfo.membershipId, characterId, page);
 
-            if (recentActivities.length === 0) {
+            if (recentActivities.length === 0 && page > 0) {
                 loadMoreButton.textContent = "No More Activities";
                 paginationContainer.classList.remove('hidden');
                 loadingMoreSpinner.classList.add('hidden');
-                return; // Stop here if no more activities
+                return; 
+            }
+             if (recentActivities.length === 0 && page === 0) {
+                activitiesContainer.innerHTML = "<p>No recent activities found for this character.</p>";
+                 paginationContainer.classList.add('hidden');
             }
             
             const activitiesWithDetails = await Promise.all(recentActivities.map(async (activity) => {
@@ -192,6 +197,8 @@ document.addEventListener('DOMContentLoaded', () => {
             card.className = 'activity-card';
             const activityDate = new Date(activity.period).toLocaleString();
             const activityName = activity.definition.displayProperties.name || 'Classified Activity';
+            card.setAttribute('data-activity-name', activityName.toLowerCase());
+
 
             let playersHtml = '<ul class="player-list">';
             activity.fireteam.forEach(player => {
@@ -253,6 +260,19 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchAndRenderActivities(currentPage);
     });
     
+    searchBar.addEventListener('input', (e) => {
+        const searchTerm = e.target.value.toLowerCase();
+        const activityCards = document.querySelectorAll('.activity-card');
+        activityCards.forEach(card => {
+            const activityName = card.getAttribute('data-activity-name');
+            if (activityName.includes(searchTerm)) {
+                card.style.display = 'block';
+            } else {
+                card.style.display = 'none';
+            }
+        });
+    });
+
     const urlParams = new URLSearchParams(window.location.search);
     const authCode = urlParams.get('code');
 
