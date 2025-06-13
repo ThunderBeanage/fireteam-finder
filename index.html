@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Destiny 2 Fireteam Finder</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header>
+        <h1>Destiny 2 Recent Player Finder</h1>
+        <p>Log in to view your recent fireteam members.</p>
+    </header>
+
+    <main id="main-content">
+        <div id="login-container">
+            <button id="login-button">Login with Bungie.net</button>
+        </div>
+
+        <div id="loading" class="hidden">
+            <div class="spinner"></div>
+            <p>Loading your fireteams...</p>
+        </div>
+
+        <div id="error-message" class="hidden">
+             <p>Something went wrong. Please try again later.</p>
+        </div>
+
+        <div id="activity-history" class="hidden">
+            <h2>Recent Activities</h2>
+            <div id="activities-container">
+                <!-- Activities will be dynamically inserted here -->
+            </div>
+        </div>
+    </main>
+
+    <script src="script.js"></script>
+</body>
+</html>
